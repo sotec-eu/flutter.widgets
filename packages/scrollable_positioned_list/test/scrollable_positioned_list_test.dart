@@ -2,9 +2,12 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+import 'dart:math';
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
+import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pedantic/pedantic.dart';
 import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
@@ -21,18 +24,20 @@ const tolerance = 1e-3;
 void main() {
   Future<void> setUpWidgetTest(
     WidgetTester tester, {
-    Key key,
-    ItemScrollController itemScrollController,
-    ItemPositionsListener itemPositionsListener,
+    Key? key,
+    ItemScrollController? itemScrollController,
+    ItemPositionsListener? itemPositionsListener,
     int initialIndex = 0,
     double initialAlignment = 0.0,
-    int itemCount,
-    ScrollPhysics physics,
+    int itemCount = defaultItemCount,
+    ScrollPhysics? physics,
     bool addSemanticIndexes = true,
-    int semanticChildCount,
-    EdgeInsets padding,
+    int? semanticChildCount,
+    EdgeInsets? padding,
     bool addRepaintBoundaries = true,
     bool addAutomaticKeepAlives = true,
+    double? minCacheExtent,
+    bool variableHeight = false,
   }) async {
     tester.binding.window.devicePixelRatioTestValue = 1.0;
     tester.binding.window.physicalSizeTestValue =
@@ -42,12 +47,16 @@ void main() {
       MaterialApp(
         home: ScrollablePositionedList.builder(
           key: key,
-          itemCount: itemCount ?? defaultItemCount,
+          itemCount: itemCount,
           itemScrollController: itemScrollController,
-          itemBuilder: (context, index) => SizedBox(
-            height: itemHeight,
-            child: Text('Item $index'),
-          ),
+          itemBuilder: (context, index) {
+            assert(index >= 0 && index <= itemCount - 1);
+            return SizedBox(
+              height:
+                  variableHeight ? (itemHeight + (index % 13) * 5) : itemHeight,
+              child: Text('Item $index'),
+            );
+          },
           itemPositionsListener: itemPositionsListener,
           initialScrollIndex: initialIndex,
           initialAlignment: initialAlignment,
@@ -57,6 +66,7 @@ void main() {
           padding: padding,
           addAutomaticKeepAlives: addAutomaticKeepAlives,
           addRepaintBoundaries: addRepaintBoundaries,
+          minCacheExtent: minCacheExtent,
         ),
       ),
     );
@@ -378,17 +388,19 @@ void main() {
         1);
   });
 
-  testWidgets('Scroll to 15 without fading', (WidgetTester tester) async {
+  testWidgets('Scroll to 20 without fading', (WidgetTester tester) async {
     final itemScrollController = ItemScrollController();
     final itemPositionsListener = ItemPositionsListener.create();
     await setUpWidgetTest(tester,
         itemScrollController: itemScrollController,
         itemPositionsListener: itemPositionsListener);
 
-    var opacityWidget = tester.widget<Opacity>(find.descendant(
-        of: find.byType(ScrollablePositionedList),
-        matching: find.byType(Opacity)));
-    final initialOpacity = opacityWidget.opacity;
+    var fadeTransition = tester.widget<FadeTransition>(find
+        .descendant(
+            of: find.byType(ScrollablePositionedList),
+            matching: find.byType(FadeTransition))
+        .last);
+    final initialOpacity = fadeTransition.opacity;
 
     unawaited(
         itemScrollController.scrollTo(index: 20, duration: scrollDuration));
@@ -396,10 +408,12 @@ void main() {
     await tester.pump();
     await tester.pump(scrollDuration ~/ 2);
 
-    opacityWidget = tester.widget(find.descendant(
-        of: find.byType(ScrollablePositionedList),
-        matching: find.byType(Opacity)));
-    expect(opacityWidget.opacity, initialOpacity);
+    fadeTransition = tester.widget<FadeTransition>(find
+        .descendant(
+            of: find.byType(ScrollablePositionedList),
+            matching: find.byType(FadeTransition))
+        .last);
+    expect(fadeTransition.opacity, initialOpacity);
 
     await tester.pumpAndSettle();
 
@@ -443,40 +457,44 @@ void main() {
     final itemScrollController = ItemScrollController();
     await setUpWidgetTest(tester, itemScrollController: itemScrollController);
 
+    var fadeTransitionFinder = find.descendant(
+        of: find.byType(ScrollablePositionedList),
+        matching: find.byType(FadeTransition));
+
     unawaited(
         itemScrollController.scrollTo(index: 100, duration: scrollDuration));
     await tester.pump();
     await tester.pump();
+    expect(fadeTransitionFinder.evaluate().length, 2);
     expect(
-        tester
-            .widget<Opacity>(find.descendant(
-                of: find.byType(ScrollablePositionedList),
-                matching: find.byType(Opacity)))
-            .opacity,
-        closeTo(1, 0.01));
+      tester.widget<FadeTransition>(fadeTransitionFinder.last).opacity.value,
+      closeTo(0, 0.01),
+    );
 
     await tester.pump(scrollDuration ~/ 2);
 
     expect(tester.getTopLeft(find.text('Item 10')).dy, 0);
     expect(tester.getBottomLeft(find.text('Item 19')).dy, screenHeight);
+    expect(fadeTransitionFinder.evaluate().length, 2);
     expect(
-        tester
-            .widget<Opacity>(find.descendant(
-                of: find.byType(ScrollablePositionedList),
-                matching: find.byType(Opacity)))
-            .opacity,
-        closeTo(0.5, 0.01));
+      tester.widget<FadeTransition>(fadeTransitionFinder.last).opacity.value,
+      closeTo(0.5, 0.01),
+    );
 
-    await tester.pump(scrollDuration ~/ 2);
+    await tester.pump(scrollDuration ~/ 2 - scrollDurationTolerance);
+    expect(fadeTransitionFinder.evaluate().length, 2);
     expect(
-        tester
-            .widget<Opacity>(find.descendant(
-                of: find.byType(ScrollablePositionedList),
-                matching: find.byType(Opacity)))
-            .opacity,
-        closeTo(0, 0.01));
+      tester.widget<FadeTransition>(fadeTransitionFinder.last).opacity.value,
+      closeTo(1, 0.01),
+    );
 
     await tester.pumpAndSettle();
+
+    expect(fadeTransitionFinder.evaluate().length, 1);
+    expect(
+      tester.widget<FadeTransition>(fadeTransitionFinder.last).opacity.value,
+      closeTo(1, 0.01),
+    );
   });
 
   testWidgets('Scroll to 100 (not already on screen) back scroll view',
@@ -517,18 +535,24 @@ void main() {
     await tester.pump();
     expect(
         tester
-            .widget<Opacity>(find.descendant(
-                of: find.byType(ScrollablePositionedList),
-                matching: find.byType(Opacity)))
-            .opacity,
+            .widget<FadeTransition>(find
+                .descendant(
+                    of: find.byType(ScrollablePositionedList),
+                    matching: find.byType(FadeTransition))
+                .last)
+            .opacity
+            .value,
         closeTo(0, 0.01));
     await tester.pump(scrollDuration + scrollDurationTolerance);
     expect(
         tester
-            .widget<Opacity>(find.descendant(
-                of: find.byType(ScrollablePositionedList),
-                matching: find.byType(Opacity)))
-            .opacity,
+            .widget<FadeTransition>(find
+                .descendant(
+                    of: find.byType(ScrollablePositionedList),
+                    matching: find.byType(FadeTransition))
+                .last)
+            .opacity
+            .value,
         closeTo(1, 0.01));
 
     expect(find.text('Item 0'), findsOneWidget);
@@ -588,9 +612,13 @@ void main() {
     expect(tester.getBottomLeft(find.text('Item 19')).dy, screenHeight);
     expect(
         tester
-            .widget<Opacity>(find.ancestor(
-                of: find.text('Item 10'), matching: find.byType(Opacity)))
-            .opacity,
+            .widget<FadeTransition>(find
+                .descendant(
+                    of: find.byType(ScrollablePositionedList),
+                    matching: find.byType(FadeTransition))
+                .last)
+            .opacity
+            .value,
         closeTo(0.5, 0.01));
 
     await tester.pumpAndSettle();
@@ -698,6 +726,28 @@ void main() {
             .itemLeadingEdge,
         0.5);
   });
+
+  testWidgets('Manually scroll a significant distance, jump to 100',
+      (WidgetTester tester) async {
+    // Test for https://github.com/google/flutter.widgets/issues/144.
+    final itemScrollController = ItemScrollController();
+    final itemPositionsListener = ItemPositionsListener.create();
+    await setUpWidgetTest(tester,
+        itemScrollController: itemScrollController,
+        itemPositionsListener: itemPositionsListener,
+        variableHeight: true);
+
+    final listFinder = find.byType(ScrollablePositionedList);
+    for (var i = 0; i < 5; i += 1) {
+      await tester.drag(listFinder, const Offset(0, -screenHeight));
+      await tester.pumpAndSettle();
+    }
+
+    itemScrollController.jumpTo(index: 100);
+    await tester.pumpAndSettle();
+
+    expect(tester.getTopLeft(find.text('Item 100')).dy, 0);
+  }, skip: true);
 
   testWidgets('Scroll to 100 and position at bottom',
       (WidgetTester tester) async {
@@ -850,10 +900,12 @@ void main() {
     await tester.pump();
 
     expect(tester.getTopLeft(find.text('Item 9')).dy, 0);
-    final opacityWidget = tester.widget<Opacity>(find.descendant(
-        of: find.byType(ScrollablePositionedList),
-        matching: find.byType(Opacity)));
-    expect(opacityWidget.opacity, 1.0);
+    final fadeTransition = tester.widget<FadeTransition>(find
+        .descendant(
+            of: find.byType(ScrollablePositionedList),
+            matching: find.byType(FadeTransition))
+        .last);
+    expect(fadeTransition.opacity.value, 1.0);
 
     await tester.pumpAndSettle();
   });
@@ -872,10 +924,12 @@ void main() {
     await tester.pump();
 
     expect(tester.getTopLeft(find.text('Item 10')).dy, 0);
-    final opacityWidget = tester.widget<Opacity>(find.descendant(
-        of: find.byType(ScrollablePositionedList),
-        matching: find.byType(Opacity)));
-    expect(opacityWidget.opacity, 1.0);
+    final fadeTransition = tester.widget<FadeTransition>(find
+        .descendant(
+            of: find.byType(ScrollablePositionedList),
+            matching: find.byType(FadeTransition))
+        .last);
+    expect(fadeTransition.opacity.value, 1.0);
 
     await tester.pumpAndSettle();
   });
@@ -898,7 +952,7 @@ void main() {
     await tester.pump();
 
     expect(tester.getTopLeft(find.text('Item 91')).dy, 0);
-    expect(find.byType(Opacity), findsNothing);
+    expect(find.byType(FadeTransition), findsNWidgets(2));
 
     await tester.pumpAndSettle();
   });
@@ -923,7 +977,7 @@ void main() {
     expect(tester.getBottomLeft(find.text('Item 100')).dy,
         closeTo(screenHeight, tolerance));
     expect(find.text('Item 9', skipOffstage: false), findsNothing);
-    expect(find.byType(Opacity), findsNothing);
+    expect(find.byType(FadeTransition), findsNWidgets(2));
 
     await tester.pumpAndSettle();
   });
@@ -946,10 +1000,12 @@ void main() {
     await tester.pump();
 
     expect(tester.getTopLeft(find.text('Item 9')).dy, closeTo(0, tolerance));
-    final opacityWidget = tester.widget<Opacity>(find.descendant(
-        of: find.byType(ScrollablePositionedList),
-        matching: find.byType(Opacity)));
-    expect(opacityWidget.opacity, 1.0);
+    final fadeTransition = tester.widget<FadeTransition>(find
+        .descendant(
+            of: find.byType(ScrollablePositionedList),
+            matching: find.byType(FadeTransition))
+        .last);
+    expect(fadeTransition.opacity.value, 1.0);
 
     await tester.pumpAndSettle();
   });
@@ -972,7 +1028,7 @@ void main() {
     await tester.pump();
 
     expect(tester.getTopLeft(find.text('Item 90')).dy, 0);
-    expect(find.byType(Opacity), findsNothing);
+    expect(find.byType(FadeTransition), findsNWidgets(2));
 
     await tester.pumpAndSettle();
   });
@@ -1062,6 +1118,59 @@ void main() {
 
     expect(tester.getTopLeft(find.text('Item 0')).dy, 0);
     expect(find.text('Item 100'), findsNothing);
+  });
+
+  testWidgets(
+      'Scroll to 100, scroll to 200, then scroll to 300 without waiting',
+      (WidgetTester tester) async {
+    // Possibly https://github.com/google/flutter.widgets/issues/171.
+    final itemScrollController = ItemScrollController();
+    await setUpWidgetTest(tester, itemScrollController: itemScrollController);
+
+    unawaited(
+        itemScrollController.scrollTo(index: 100, duration: scrollDuration));
+    unawaited(
+        itemScrollController.scrollTo(index: 200, duration: scrollDuration));
+    unawaited(
+        itemScrollController.scrollTo(index: 300, duration: scrollDuration));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Item 100'), findsNothing);
+    expect(find.text('Item 200'), findsNothing);
+
+    var itemFinder = find.text('Item 300');
+    expect(itemFinder, findsOneWidget);
+    expect(tester.getTopLeft(itemFinder).dy, 0);
+  }, skip: true);
+
+  testWidgets(
+      'Jump to 400 at bottom, manually scroll, scroll to 100 at bottom and back',
+      (WidgetTester tester) async {
+    final itemScrollController = ItemScrollController();
+    final itemPositionsListener = ItemPositionsListener.create();
+    await setUpWidgetTest(tester,
+        itemScrollController: itemScrollController,
+        itemPositionsListener: itemPositionsListener);
+
+    itemScrollController.jumpTo(index: 400, alignment: 1);
+    await tester.pumpAndSettle();
+
+    final listFinder = find.byType(ScrollablePositionedList);
+
+    await tester.drag(listFinder, const Offset(0, -screenHeight));
+    await tester.pumpAndSettle();
+
+    unawaited(itemScrollController.scrollTo(
+        index: 100, alignment: 1, duration: scrollDuration));
+    await tester.pumpAndSettle();
+
+    unawaited(itemScrollController.scrollTo(
+        index: 400, alignment: 1, duration: scrollDuration));
+    await tester.pumpAndSettle();
+
+    var itemFinder = find.text('Item 399');
+    expect(itemFinder, findsOneWidget);
+    expect(tester.getBottomLeft(itemFinder).dy, screenHeight);
   });
 
   testWidgets('physics', (WidgetTester tester) async {
@@ -1203,6 +1312,22 @@ void main() {
     expect(customScrollView2.semanticChildCount, defaultItemCount);
   });
 
+  testWidgets('Semantic tree contains items in cache',
+      (WidgetTester tester) async {
+    final itemPositionsListener = ItemPositionsListener.create();
+    await setUpWidgetTest(tester, itemPositionsListener: itemPositionsListener);
+
+    final root = WidgetsBinding
+        .instance!.pipelineOwner.semanticsOwner!.rootSemanticsNode!;
+
+    final semanticNodes = <SemanticsNode>[root];
+
+    collectSemanticNodes(root, semanticNodes);
+
+    expect(semanticNodes.where((element) => element.label == 'Item 10'),
+        isNotEmpty);
+  });
+
   testWidgets('padding test - centered at top', (WidgetTester tester) async {
     final itemScrollController = ItemScrollController();
     await setUpWidgetTest(
@@ -1329,10 +1454,10 @@ void main() {
     final itemScrollController = ItemScrollController();
     await setUpWidgetTest(tester, itemScrollController: itemScrollController);
 
-    itemScrollController.jumpTo(index: defaultItemCount);
+    itemScrollController.jumpTo(index: defaultItemCount - 1);
     await tester.pumpAndSettle();
 
-    expect(tester.getBottomLeft(find.text('Item $defaultItemCount')).dy,
+    expect(tester.getBottomLeft(find.text('Item ${defaultItemCount - 1}')).dy,
         screenHeight);
   });
 
@@ -1341,10 +1466,10 @@ void main() {
     await setUpWidgetTest(tester, itemScrollController: itemScrollController);
 
     unawaited(itemScrollController.scrollTo(
-        index: defaultItemCount, duration: scrollDuration));
+        index: defaultItemCount - 1, duration: scrollDuration));
     await tester.pumpAndSettle();
 
-    expect(tester.getBottomLeft(find.text('Item $defaultItemCount')).dy,
+    expect(tester.getBottomLeft(find.text('Item ${defaultItemCount - 1}')).dy,
         screenHeight);
   });
 
@@ -1354,14 +1479,14 @@ void main() {
     await setUpWidgetTest(tester, itemScrollController: itemScrollController);
 
     unawaited(itemScrollController.scrollTo(
-        index: defaultItemCount, duration: scrollDuration));
+        index: defaultItemCount - 1, duration: scrollDuration));
     await tester.pumpAndSettle();
     itemScrollController.jumpTo(index: 0);
     await tester.pumpAndSettle();
-    itemScrollController.jumpTo(index: defaultItemCount);
+    itemScrollController.jumpTo(index: defaultItemCount - 1);
     await tester.pumpAndSettle();
 
-    expect(tester.getBottomLeft(find.text('Item $defaultItemCount')).dy,
+    expect(tester.getBottomLeft(find.text('Item ${defaultItemCount - 1}')).dy,
         screenHeight);
   });
 
@@ -1370,17 +1495,17 @@ void main() {
     final itemScrollController = ItemScrollController();
     await setUpWidgetTest(tester, itemScrollController: itemScrollController);
 
-    itemScrollController.jumpTo(index: defaultItemCount);
+    itemScrollController.jumpTo(index: defaultItemCount - 1);
     await tester.pumpAndSettle();
 
     unawaited(
         itemScrollController.scrollTo(index: 0, duration: scrollDuration));
     await tester.pumpAndSettle();
     unawaited(itemScrollController.scrollTo(
-        index: defaultItemCount, duration: scrollDuration));
+        index: defaultItemCount - 1, duration: scrollDuration));
     await tester.pumpAndSettle();
 
-    expect(tester.getBottomLeft(find.text('Item $defaultItemCount')).dy,
+    expect(tester.getBottomLeft(find.text('Item ${defaultItemCount - 1}')).dy,
         screenHeight);
   });
 
@@ -1390,7 +1515,7 @@ void main() {
     final itemScrollController = ItemScrollController();
     await setUpWidgetTest(tester, itemScrollController: itemScrollController);
 
-    itemScrollController.jumpTo(index: defaultItemCount);
+    itemScrollController.jumpTo(index: defaultItemCount - 1);
     await tester.pumpAndSettle();
 
     itemScrollController.jumpTo(index: 0, alignment: 0.3);
@@ -1602,4 +1727,575 @@ void main() {
             .itemTrailingEdge,
         (itemHeight / screenHeight) / 2);
   });
+
+  testWidgets("List with no items", (WidgetTester tester) async {
+    final itemScrollController = ItemScrollController();
+    await setUpWidgetTest(tester,
+        itemScrollController: itemScrollController, itemCount: 0);
+
+    expect(find.text('Item 0'), findsNothing);
+  });
+
+  testWidgets('Jump to 100 then set itemCount to 0',
+      (WidgetTester tester) async {
+    tester.binding.window.devicePixelRatioTestValue = 1.0;
+    tester.binding.window.physicalSizeTestValue =
+        const Size(screenWidth, screenHeight);
+
+    final itemScrollController = ItemScrollController();
+    final itemPositionsListener = ItemPositionsListener.create();
+    final itemCount = ValueNotifier<int>(defaultItemCount);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ValueListenableBuilder<int>(
+          valueListenable: itemCount,
+          builder: (context, itemCount, child) {
+            return ScrollablePositionedList.builder(
+              initialScrollIndex: min(100, itemCount),
+              initialAlignment: 0,
+              itemCount: itemCount,
+              itemScrollController: itemScrollController,
+              itemPositionsListener: itemPositionsListener,
+              itemBuilder: (context, index) {
+                assert(index >= 0 && index <= itemCount - 1);
+                return SizedBox(
+                  height: itemHeight,
+                  child: Text('Item $index'),
+                );
+              },
+            );
+          },
+        ),
+      ),
+    );
+
+    await tester.pumpAndSettle();
+    itemScrollController.jumpTo(index: 100);
+    await tester.pumpAndSettle();
+    expect(find.text('Item 100'), findsOneWidget);
+
+    itemCount.value = 0;
+    await tester.pumpAndSettle();
+
+    expect(find.text('Item 0'), findsNothing);
+    expect(find.text('Item 100'), findsNothing);
+    expect(itemPositionsListener.itemPositions.value.isEmpty, isTrue);
+  });
+
+  testWidgets('List positioned with 100 at top then set itemCount to 100',
+      (WidgetTester tester) async {
+    tester.binding.window.devicePixelRatioTestValue = 1.0;
+    tester.binding.window.physicalSizeTestValue =
+        const Size(screenWidth, screenHeight);
+
+    final itemCount = ValueNotifier<int>(defaultItemCount);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ValueListenableBuilder<int>(
+          valueListenable: itemCount,
+          builder: (context, itemCount, child) {
+            return ScrollablePositionedList.builder(
+              initialScrollIndex: min(100, itemCount - 1),
+              initialAlignment: 0,
+              itemCount: itemCount,
+              itemBuilder: (context, index) {
+                assert(index >= 0 && index <= itemCount - 1);
+                return SizedBox(
+                  height: itemHeight,
+                  child: Text('Item $index'),
+                );
+              },
+            );
+          },
+        ),
+      ),
+    );
+
+    await tester.pumpAndSettle();
+    expect(tester.getTopLeft(find.text('Item 100')).dy, 0);
+
+    itemCount.value = 100;
+    await tester.pumpAndSettle();
+
+    expect(find.text('Item 100'), findsNothing);
+    expect(tester.getBottomLeft(find.text('Item 99')).dy, screenHeight);
+  });
+
+  testWidgets('List positioned with 499 at bottom then set itemCount to 100',
+      (WidgetTester tester) async {
+    tester.binding.window.devicePixelRatioTestValue = 1.0;
+    tester.binding.window.physicalSizeTestValue =
+        const Size(screenWidth, screenHeight);
+
+    final itemCount = ValueNotifier<int>(defaultItemCount);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ValueListenableBuilder<int>(
+          valueListenable: itemCount,
+          builder: (context, itemCount, child) {
+            return ScrollablePositionedList.builder(
+              initialScrollIndex: itemCount - 1,
+              itemCount: itemCount,
+              itemBuilder: (context, index) {
+                assert(index >= 0 && index <= itemCount - 1);
+                return SizedBox(
+                  height: itemHeight,
+                  child: Text('Item $index'),
+                );
+              },
+            );
+          },
+        ),
+      ),
+    );
+
+    await tester.pumpAndSettle();
+    expect(tester.getBottomRight(find.text('Item 499')).dy, screenHeight);
+
+    itemCount.value = 100;
+    await tester.pumpAndSettle();
+
+    expect(find.text('Item 100'), findsNothing);
+    expect(tester.getBottomLeft(find.text('Item 99')).dy, screenHeight);
+  });
+
+  testWidgets('Large minCacheExtent', (WidgetTester tester) async {
+    await setUpWidgetTest(tester, minCacheExtent: 200 * itemHeight);
+
+    expect(find.text('Item 100', skipOffstage: false), findsOneWidget);
+  });
+
+  testWidgets('Scroll to 20 without fading small minCacheExtent',
+      (WidgetTester tester) async {
+    final itemScrollController = ItemScrollController();
+    final itemPositionsListener = ItemPositionsListener.create();
+    await setUpWidgetTest(
+      tester,
+      itemScrollController: itemScrollController,
+      itemPositionsListener: itemPositionsListener,
+      minCacheExtent: 10,
+    );
+
+    var fadeTransition = tester.widget<FadeTransition>(find
+        .descendant(
+            of: find.byType(ScrollablePositionedList),
+            matching: find.byType(FadeTransition))
+        .last);
+    final initialOpacity = fadeTransition.opacity;
+
+    unawaited(
+        itemScrollController.scrollTo(index: 20, duration: scrollDuration));
+    await tester.pump();
+    await tester.pump();
+    await tester.pump(scrollDuration ~/ 2);
+
+    fadeTransition = tester.widget<FadeTransition>(find
+        .descendant(
+            of: find.byType(ScrollablePositionedList),
+            matching: find.byType(FadeTransition))
+        .last);
+    expect(fadeTransition.opacity, initialOpacity);
+
+    await tester.pumpAndSettle();
+
+    expect(find.text('Item 14'), findsNothing);
+    expect(find.text('Item 20'), findsOneWidget);
+  });
+
+  testWidgets('Scroll to 100 without fading for large minCacheExtent',
+      (WidgetTester tester) async {
+    final itemScrollController = ItemScrollController();
+
+    await setUpWidgetTest(
+      tester,
+      itemScrollController: itemScrollController,
+      minCacheExtent: 200 * itemHeight,
+    );
+
+    var fadeTransition = tester.widget<FadeTransition>(find
+        .descendant(
+            of: find.byType(ScrollablePositionedList),
+            matching: find.byType(FadeTransition))
+        .last);
+    final initialOpacity = fadeTransition.opacity;
+
+    unawaited(
+        itemScrollController.scrollTo(index: 100, duration: scrollDuration));
+    await tester.pump();
+    await tester.pump();
+    await tester.pump(scrollDuration ~/ 2);
+
+    fadeTransition = tester.widget<FadeTransition>(find
+        .descendant(
+            of: find.byType(ScrollablePositionedList),
+            matching: find.byType(FadeTransition))
+        .last);
+    expect(fadeTransition.opacity, initialOpacity);
+
+    await tester.pumpAndSettle();
+
+    expect(find.text('Item 100'), findsOneWidget);
+  });
+
+  testWidgets('Position list when not enough above top item to fill viewport',
+      (WidgetTester tester) async {
+    const alignment = 0.8;
+
+    await setUpWidgetTest(
+      tester,
+      itemCount: 2,
+      initialAlignment: alignment,
+      initialIndex: 0,
+    );
+
+    await tester.pumpAndSettle();
+
+    expect(tester.getTopLeft(find.text('Item 0')).dy, screenHeight * alignment);
+  });
+
+  testWidgets('Rebuild with scroll controller', (WidgetTester tester) async {
+    tester.binding.window.devicePixelRatioTestValue = 1.0;
+    tester.binding.window.physicalSizeTestValue =
+        const Size(screenWidth, screenHeight);
+    final key = ValueNotifier<Key>(ValueKey('key'));
+    final itemScrollController = ItemScrollController();
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ValueListenableBuilder<Key>(
+          valueListenable: key,
+          builder: (context, key, child) {
+            return Container(
+              key: key,
+              child: ScrollablePositionedList.builder(
+                itemCount: 200,
+                itemScrollController: itemScrollController,
+                itemBuilder: (context, index) {
+                  return SizedBox(
+                    height: itemHeight,
+                    child: Text('Item $index'),
+                  );
+                },
+              ),
+            );
+          },
+        ),
+      ),
+    );
+
+    await tester.pumpAndSettle();
+
+    key.value = ValueKey('newKey');
+    await tester.pumpAndSettle();
+
+    unawaited(
+        itemScrollController.scrollTo(index: 100, duration: scrollDuration));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Item 100'), findsOneWidget);
+  });
+
+  testWidgets('Double rebuild with scroll controller',
+      (WidgetTester tester) async {
+    tester.binding.window.devicePixelRatioTestValue = 1.0;
+    tester.binding.window.physicalSizeTestValue =
+        const Size(screenWidth, screenHeight);
+    final outerKey = ValueNotifier<Key>(ValueKey('outerKey'));
+    final innerKey = GlobalKey();
+    final listKey = ValueNotifier<Key>(ValueKey(null));
+    final itemScrollController = ItemScrollController();
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ValueListenableBuilder<Key>(
+          valueListenable: outerKey,
+          builder: (context, outerKey, child) => ValueListenableBuilder<Key>(
+            valueListenable: listKey,
+            builder: (context, listKey, child) => Container(
+              key: outerKey,
+              child: Builder(
+                builder: (context) => Container(
+                  key: innerKey,
+                  child: ScrollablePositionedList.builder(
+                    key: listKey,
+                    itemCount: 200,
+                    itemScrollController: itemScrollController,
+                    itemBuilder: (context, index) => SizedBox(
+                      height: itemHeight,
+                      child: Text('Item $index'),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    await tester.pumpAndSettle();
+
+    outerKey.value = ValueKey('newOuterKey');
+    listKey.value = ValueKey('newListKey');
+    await tester.pumpAndSettle();
+
+    unawaited(
+        itemScrollController.scrollTo(index: 100, duration: scrollDuration));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Item 100'), findsOneWidget);
+  });
+
+  testWidgets('Key change with scroll controller', (WidgetTester tester) async {
+    tester.binding.window.devicePixelRatioTestValue = 1.0;
+    tester.binding.window.physicalSizeTestValue =
+        const Size(screenWidth, screenHeight);
+    final key = ValueNotifier<Key>(ValueKey('key'));
+    final itemScrollController = ItemScrollController();
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ValueListenableBuilder<Key>(
+          valueListenable: key,
+          builder: (context, key, child) {
+            return ScrollablePositionedList.builder(
+              key: key,
+              itemCount: 10,
+              itemScrollController: itemScrollController,
+              itemBuilder: (context, index) {
+                return SizedBox(
+                  height: itemHeight,
+                  child: Text('Item $index'),
+                );
+              },
+            );
+          },
+        ),
+      ),
+    );
+
+    await tester.pumpAndSettle();
+
+    key.value = ValueKey('newKey');
+    await tester.pumpAndSettle();
+  });
+
+  testWidgets('Scroll after rebuild', (WidgetTester tester) async {
+    tester.binding.window.devicePixelRatioTestValue = 1.0;
+    tester.binding.window.physicalSizeTestValue =
+        const Size(screenWidth, screenHeight);
+    final key = ValueNotifier<Key>(ValueKey('key'));
+    final itemScrollController = ItemScrollController();
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ValueListenableBuilder<Key>(
+          valueListenable: key,
+          builder: (context, key, child) {
+            return Container(
+              key: key,
+              child: ScrollablePositionedList.builder(
+                itemCount: 100,
+                itemScrollController: itemScrollController,
+                itemBuilder: (context, index) {
+                  return SizedBox(
+                    height: itemHeight,
+                    child: Text('Item $index'),
+                  );
+                },
+              ),
+            );
+          },
+        ),
+      ),
+    );
+
+    await tester.pumpAndSettle();
+
+    key.value = ValueKey('newKey');
+    await tester.pumpAndSettle();
+
+    unawaited(
+        itemScrollController.scrollTo(index: 70, duration: scrollDuration));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Item 70'), findsOneWidget);
+  });
+
+  testWidgets('Scroll after rebuild when resusing state',
+      (WidgetTester tester) async {
+    tester.binding.window.devicePixelRatioTestValue = 1.0;
+    tester.binding.window.physicalSizeTestValue =
+        const Size(screenWidth, screenHeight);
+    final containerKey = ValueNotifier<Key>(ValueKey('key'));
+    final scrollKey = GlobalKey();
+    final itemScrollController = ItemScrollController();
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ValueListenableBuilder<Key>(
+          valueListenable: containerKey,
+          builder: (context, key, child) {
+            return Container(
+              key: key,
+              child: ScrollablePositionedList.builder(
+                key: scrollKey,
+                itemCount: 100,
+                itemScrollController: itemScrollController,
+                itemBuilder: (context, index) {
+                  return SizedBox(
+                    height: itemHeight,
+                    child: Text('Item $index'),
+                  );
+                },
+              ),
+            );
+          },
+        ),
+      ),
+    );
+
+    await tester.pumpAndSettle();
+
+    containerKey.value = ValueKey('newKey');
+    await tester.pumpAndSettle();
+
+    unawaited(
+        itemScrollController.scrollTo(index: 70, duration: scrollDuration));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Item 70'), findsOneWidget);
+  });
+
+  testWidgets('Scroll after changing scroll controller',
+      (WidgetTester tester) async {
+    tester.binding.window.devicePixelRatioTestValue = 1.0;
+    tester.binding.window.physicalSizeTestValue =
+        const Size(screenWidth, screenHeight);
+
+    final itemScrollController0 = ItemScrollController();
+    final itemScrollController1 = ItemScrollController();
+    final itemScrollControllerListenable = ValueNotifier(itemScrollController0);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ValueListenableBuilder<ItemScrollController>(
+          valueListenable: itemScrollControllerListenable,
+          builder: (context, itemScrollController, child) {
+            return ScrollablePositionedList.builder(
+              itemCount: 100,
+              itemScrollController: itemScrollController,
+              itemBuilder: (context, index) {
+                return SizedBox(
+                  height: itemHeight,
+                  child: Text('Item $index'),
+                );
+              },
+            );
+          },
+        ),
+      ),
+    );
+
+    await tester.pumpAndSettle();
+    expect(itemScrollController0.isAttached, true);
+    expect(itemScrollController1.isAttached, false);
+
+    itemScrollControllerListenable.value = itemScrollController1;
+    await tester.pumpAndSettle();
+
+    expect(itemScrollController0.isAttached, false);
+    expect(itemScrollController1.isAttached, true);
+
+    unawaited(
+        itemScrollController1.scrollTo(index: 70, duration: scrollDuration));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Item 70'), findsOneWidget);
+  });
+
+  testWidgets('Scroll after swapping scroll controllers',
+      (WidgetTester tester) async {
+    tester.binding.window.devicePixelRatioTestValue = 1.0;
+    tester.binding.window.physicalSizeTestValue =
+        const Size(screenWidth, screenHeight);
+
+    final itemScrollController0 = ItemScrollController();
+    final itemScrollController1 = ItemScrollController();
+    final topItemScrollControllerListenable =
+        ValueNotifier(itemScrollController0);
+    final bottomItemScrollControllerListenable =
+        ValueNotifier(itemScrollController1);
+
+    await tester.pumpWidget(MaterialApp(
+      home: Column(
+        children: [
+          Expanded(
+            child: ValueListenableBuilder<ItemScrollController>(
+              valueListenable: topItemScrollControllerListenable,
+              builder: (context, itemScrollController, child) {
+                return ScrollablePositionedList.builder(
+                  itemCount: 100,
+                  itemScrollController: itemScrollController,
+                  itemBuilder: (context, index) {
+                    return SizedBox(
+                      height: itemHeight,
+                      child: Text('Item $index'),
+                    );
+                  },
+                );
+              },
+            ),
+          ),
+          Expanded(
+            child: ValueListenableBuilder<ItemScrollController>(
+              valueListenable: bottomItemScrollControllerListenable,
+              builder: (context, itemScrollController, child) {
+                return ScrollablePositionedList.builder(
+                  itemCount: 100,
+                  itemScrollController: itemScrollController,
+                  itemBuilder: (context, index) {
+                    return SizedBox(
+                      height: itemHeight,
+                      child: Text('Item $index'),
+                    );
+                  },
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    ));
+
+    await tester.pumpAndSettle();
+    expect(itemScrollController0.isAttached, true);
+    expect(itemScrollController1.isAttached, true);
+
+    topItemScrollControllerListenable.value = itemScrollController1;
+    bottomItemScrollControllerListenable.value = itemScrollController0;
+    await tester.pumpAndSettle();
+
+    expect(itemScrollController0.isAttached, true);
+    expect(itemScrollController1.isAttached, true);
+
+    unawaited(
+        itemScrollController1.scrollTo(index: 70, duration: scrollDuration));
+    unawaited(
+        itemScrollController0.scrollTo(index: 50, duration: scrollDuration));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Item 70'), findsOneWidget);
+    expect(find.text('Item 50'), findsOneWidget);
+  });
+}
+
+bool collectSemanticNodes(SemanticsNode root, List<SemanticsNode> nodes) {
+  nodes.add(root);
+  if (!root.hasChildren) return true;
+  root.visitChildren((child) => collectSemanticNodes(child, nodes));
+  return true;
 }

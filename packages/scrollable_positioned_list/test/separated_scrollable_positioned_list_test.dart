@@ -22,16 +22,16 @@ const tolerance = 1e-3;
 void main() {
   Future<void> setUpWidgetTest(
     WidgetTester tester, {
-    Key key,
-    ItemScrollController itemScrollController,
-    ItemPositionsListener itemPositionsListener,
+    Key? key,
+    ItemScrollController? itemScrollController,
+    ItemPositionsListener? itemPositionsListener,
     int initialIndex = 0,
     double initialAlignment = 0.0,
-    int itemCount,
-    ScrollPhysics physics,
+    int? itemCount,
+    ScrollPhysics? physics,
     bool addSemanticIndexes = true,
-    int semanticChildCount,
-    EdgeInsets padding,
+    int? semanticChildCount,
+    EdgeInsets? padding,
     bool addRepaintBoundaries = true,
     bool addAutomaticKeepAlives = true,
   }) async {
@@ -483,8 +483,126 @@ void main() {
 
     expect(find.byKey(key), findsOneWidget);
   });
+
+  testWidgets('Empty list then update to single item list',
+      (WidgetTester tester) async {
+    tester.binding.window.devicePixelRatioTestValue = 1.0;
+    tester.binding.window.physicalSizeTestValue =
+        const Size(screenWidth, screenHeight);
+
+    final itemScrollController = ItemScrollController();
+    final itemPositionsListener = ItemPositionsListener.create();
+    final itemCount = ValueNotifier<int>(0);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ValueListenableBuilder<int>(
+          valueListenable: itemCount,
+          builder: (context, itemCount, child) {
+            return ScrollablePositionedList.separated(
+              initialScrollIndex: 0,
+              initialAlignment: 0,
+              itemCount: itemCount,
+              itemScrollController: itemScrollController,
+              itemPositionsListener: itemPositionsListener,
+              itemBuilder: (context, index) => SizedBox(
+                height: itemHeight,
+                child: Text('Item $index'),
+              ),
+              separatorBuilder: (context, index) => SizedBox(
+                height: separatorHeight,
+                child: Text('Separator $index'),
+              ),
+            );
+          },
+        ),
+      ),
+    );
+
+    await tester.pumpAndSettle();
+
+    itemCount.value = 1;
+    await tester.pumpAndSettle();
+
+    expect(find.text('Item 0'), findsOneWidget);
+    expect(find.text('Separator 0'), findsNothing);
+  });
+
+  testWidgets('ItemPositions: Empty list then update to 10 items list',
+      (WidgetTester tester) async {
+    tester.binding.window.devicePixelRatioTestValue = 1.0;
+    tester.binding.window.physicalSizeTestValue =
+        const Size(screenWidth, screenHeight);
+
+    final itemScrollController = ItemScrollController();
+    final itemPositionsListener = ItemPositionsListener.create();
+    final itemCount = ValueNotifier<int>(0);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ValueListenableBuilder<int>(
+          valueListenable: itemCount,
+          builder: (context, itemCount, child) {
+            return ScrollablePositionedList.separated(
+              initialScrollIndex: 0,
+              initialAlignment: 0,
+              itemCount: itemCount,
+              itemScrollController: itemScrollController,
+              itemPositionsListener: itemPositionsListener,
+              itemBuilder: (context, index) => SizedBox(
+                height: itemHeight,
+                child: Text('Item $index'),
+              ),
+              separatorBuilder: (context, index) => SizedBox(
+                height: separatorHeight,
+                child: Text('Separator $index'),
+              ),
+            );
+          },
+        ),
+      ),
+    );
+
+    await tester.pumpAndSettle();
+
+    expect(find.text('Item 0'), findsNothing);
+    expect(find.text('Separator 0'), findsNothing);
+    expect(itemPositionsListener.itemPositions.value, []);
+
+    itemCount.value = 10;
+    await tester.pumpAndSettle();
+
+    expect(find.text('Item 0'), findsOneWidget);
+    expect(find.text('Separator 5'), findsOneWidget);
+    expect(find.text('Item 6'), findsOneWidget);
+    expect(find.text('Separator 6'), findsNothing);
+    expect(find.text('Item 7'), findsNothing);
+
+    expect(itemPositionsListener.itemPositions.value, isNotEmpty);
+    expect(
+        itemPositionsListener.itemPositions.value
+            .firstWhere((position) => position.index == 0)
+            .itemLeadingEdge,
+        0);
+    expect(
+        itemPositionsListener.itemPositions.value
+            .firstWhere((position) => position.index == 5)
+            .itemTrailingEdge,
+        1 - _screenProportion(numberOfItems: 1, numberOfSeparators: 1));
+
+    expect(
+        itemPositionsListener.itemPositions.value
+            .firstWhere((position) => position.index == 6)
+            .itemTrailingEdge,
+        1);
+    expect(
+        itemPositionsListener.itemPositions.value
+            .where((position) => position.index == 7),
+        isEmpty);
+  });
 }
 
-double _screenProportion({double numberOfItems, double numberOfSeparators}) =>
+double _screenProportion(
+        {required double numberOfItems, required double numberOfSeparators}) =>
     (numberOfItems * itemHeight + numberOfSeparators * separatorHeight) /
     screenHeight;

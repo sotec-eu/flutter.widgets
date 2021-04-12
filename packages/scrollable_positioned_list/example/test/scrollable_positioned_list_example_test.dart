@@ -5,13 +5,14 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:scrollable_positioned_list_example/scrollable_positioned_list_example.dart';
 import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
+
+import 'package:scrollable_positioned_list_example/main.dart';
 
 void main() {
   setUp(() {
-    WidgetsBinding.instance.renderView.configuration = TestViewConfiguration(
-        size: const Size(800, 900), window: RendererBinding.instance.window);
+    WidgetsBinding.instance!.renderView.configuration = TestViewConfiguration(
+        size: const Size(800, 900), window: RendererBinding.instance!.window);
   });
 
   testWidgets('Start at 0', (WidgetTester tester) async {
